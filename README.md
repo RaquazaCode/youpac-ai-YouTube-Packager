@@ -2,6 +2,8 @@
 
 An AI-powered platform that helps YouTube creators generate compelling titles, descriptions, thumbnails, and social media posts from their video content. Built with React Router v7, Convex, and OpenAI.
 
+DeepWiki processed here: https://deepwiki.com/michaelshimeles/youpac-ai
+
 ## Features
 
 ### Core Functionality
