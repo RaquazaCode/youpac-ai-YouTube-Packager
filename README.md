@@ -4,6 +4,8 @@ An AI-powered platform that helps YouTube creators generate compelling titles, d
 
 DeepWiki processed here: https://deepwiki.com/michaelshimeles/youpac-ai
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/michaelshimeles/youpac-ai)
+
 ## Features
 
 ### Core Functionality
