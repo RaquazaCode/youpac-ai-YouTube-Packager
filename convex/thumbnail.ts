@@ -16,6 +16,11 @@ export const generateThumbnail = action({
     videoData: v.object({
       title: v.optional(v.string()),
       transcription: v.optional(v.string()),
+      manualTranscriptions: v.optional(v.array(v.object({
+        fileName: v.string(),
+        text: v.string(),
+        format: v.string(),
+      }))),
       duration: v.optional(v.number()),
       resolution: v.optional(v.object({
         width: v.number(),
@@ -39,6 +44,13 @@ export const generateThumbnail = action({
       })
     ),
     additionalContext: v.optional(v.string()),
+    moodBoardReferences: v.optional(v.array(
+      v.object({
+        url: v.string(),
+        type: v.string(),
+        title: v.optional(v.string()),
+      })
+    )),
   },
   handler: async (ctx, args): Promise<{ concept: string; imageUrl: string; prompt?: string; storageId?: string }> => {
     console.log("[Thumbnail] Starting thumbnail generation process");
@@ -48,7 +60,8 @@ export const generateThumbnail = action({
       frameCount: args.videoFrames.length,
       hasTranscription: !!args.videoData.transcription,
       hasProfile: !!args.profileData,
-      connectedAgentsCount: args.connectedAgentOutputs.length
+      connectedAgentsCount: args.connectedAgentOutputs.length,
+      moodBoardCount: args.moodBoardReferences?.length || 0
     });
     
     const identity = await ctx.auth.getUserIdentity();
@@ -69,7 +82,7 @@ export const generateThumbnail = action({
       if (args.videoId) {
         console.log("[Thumbnail] Fetching fresh video data for ID:", args.videoId);
         const freshVideoData = await ctx.runQuery(api.videos.getWithTranscription, {
-          id: args.videoId,
+          videoId: args.videoId,
         });
         console.log("[Thumbnail] Fresh video data fetched:", {
           hasTitle: !!freshVideoData?.title,
@@ -108,6 +121,17 @@ export const generateThumbnail = action({
         thumbnailPrompt += `\nVideo Content Summary: ${summary}...\n`;
       }
       
+      // Add manual transcriptions if available
+      if (videoData.manualTranscriptions && videoData.manualTranscriptions.length > 0) {
+        thumbnailPrompt += "\nManual Transcriptions Provided:\n";
+        videoData.manualTranscriptions.forEach((transcript, index) => {
+          thumbnailPrompt += `\n--- ${transcript.fileName} (${transcript.format.toUpperCase()}) ---\n`;
+          const excerpt = transcript.text.slice(0, 800);
+          thumbnailPrompt += `${excerpt}...\n`;
+        });
+        thumbnailPrompt += "\n";
+      }
+      
       if (args.connectedAgentOutputs.length > 0) {
         thumbnailPrompt += "\nRelated content:\n";
         args.connectedAgentOutputs.forEach(({ type, content }) => {
@@ -130,6 +154,52 @@ export const generateThumbnail = action({
         thumbnailPrompt += `\nSpecific requirements: ${args.additionalContext}\n`;
       }
       
+      // Process mood board references before adding to prompt
+      let moodBoardImages: Array<{ type: string; imageUrl: string; title: string }> = [];
+      
+      if (args.moodBoardReferences && args.moodBoardReferences.length > 0) {
+        console.log("[Thumbnail] Processing mood board references:", args.moodBoardReferences.length);
+        
+        try {
+          // Process mood board references to download images
+          const processedRefs = await ctx.runAction(api.moodboardUtils.processMoodBoardReferences, {
+            references: args.moodBoardReferences,
+            maxImages: 3, // Limit to 3 mood board images to avoid overwhelming the prompt
+          });
+          
+          console.log("[Thumbnail] Processed mood board references:", processedRefs.length);
+          
+          // Add text description to prompt
+          thumbnailPrompt += "\nMOOD BOARD REFERENCES:\n";
+          
+          processedRefs.forEach((ref: any) => {
+            if (ref.imageData) {
+              // Store image for later inclusion in vision API
+              moodBoardImages.push({
+                type: ref.type,
+                imageUrl: ref.imageData,
+                title: ref.title || ref.url,
+              });
+              thumbnailPrompt += `- [${ref.type}] ${ref.title || ref.url} (visual reference included)\n`;
+            } else {
+              // Just text reference
+              thumbnailPrompt += `- [${ref.type}] ${ref.description}\n`;
+            }
+          });
+          
+          if (moodBoardImages.length > 0) {
+            thumbnailPrompt += "Use these visual references for style inspiration, color palette, composition, and overall aesthetic.\n";
+          }
+        } catch (error) {
+          console.error("[Thumbnail] Error processing mood board references:", error);
+          // Fallback to just text descriptions
+          thumbnailPrompt += "\nMOOD BOARD REFERENCES (text only due to processing error):\n";
+          args.moodBoardReferences.forEach(ref => {
+            thumbnailPrompt += `- [${ref.type}] ${ref.title || ref.url}\n`;
+          });
+        }
+      }
+      
       thumbnailPrompt += `\nDesign Requirements:\n`;
       thumbnailPrompt += `1. High contrast and vibrant colors\n`;
       thumbnailPrompt += `2. Clear, readable text overlay (3-5 words max)\n`;
@@ -138,6 +208,7 @@ export const generateThumbnail = action({
       thumbnailPrompt += `5. Professional quality that stands out in search results\n`;
       
       console.log("[Thumbnail] Prompt created, length:", thumbnailPrompt.length);
+      console.log("[Thumbnail] Mood board images included:", moodBoardImages.length);
       
       // First, analyze the uploaded images with GPT-4 Vision
       console.log("[Thumbnail] Analyzing uploaded images with GPT-4 Vision...");
@@ -157,6 +228,14 @@ export const generateThumbnail = action({
               image_url: {
                 url: frame.dataUrl,
                 detail: "high" as const,
+              },
+            })),
+            // Include mood board images if available
+            ...moodBoardImages.map((mbImage) => ({
+              type: "image_url" as const,
+              image_url: {
+                url: mbImage.imageUrl,
+                detail: "low" as const, // Lower detail for mood board references
               },
             })),
           ],
@@ -265,6 +344,13 @@ export const generateThumbnail = action({
         if (args.profileData.targetAudience) {
           gptImagePrompt += `Target audience: ${args.profileData.targetAudience}\n`;
         }
+      }
+      
+      // Add mood board references to the generation prompt
+      if (moodBoardImages.length > 0) {
+        gptImagePrompt += "\nMOOD BOARD VISUAL REFERENCES:\n";
+        gptImagePrompt += `${moodBoardImages.length} visual references have been included for style inspiration.\n`;
+        gptImagePrompt += "Study their composition, color schemes, and overall aesthetic to create a cohesive thumbnail.\n";
       }
       
       // Add any specific context from the user

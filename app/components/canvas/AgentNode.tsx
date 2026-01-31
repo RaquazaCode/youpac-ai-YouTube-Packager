@@ -14,7 +14,9 @@ import {
   Palette,
   Zap,
   Bot,
-  Brain
+  Brain,
+  Files,
+  Download
 } from "lucide-react";
 import { Card } from "~/components/ui/card";
 import { Badge } from "~/components/ui/badge";
@@ -31,6 +33,10 @@ export interface AgentNodeData {
     percent: number;
   };
   lastPrompt?: string;
+  hasManualTranscriptions?: boolean;
+  manualTranscriptionCount?: number;
+  hasMoodBoard?: boolean;
+  moodBoardCount?: number;
 }
 
 const agentConfig = {
@@ -103,6 +109,31 @@ const cleanDraftText = (draft: string, type: string): string => {
 export const AgentNode = memo(({ data, selected, id }: ExtendedNodeProps) => {
   const config = agentConfig[data.type];
   const Icon = config.icon;
+  
+  const handleDownloadThumbnail = async (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent triggering the view modal
+    
+    if (!data.thumbnailUrl) return;
+    
+    try {
+      const response = await fetch(data.thumbnailUrl);
+      const blob = await response.blob();
+      
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      a.download = `youtube-thumbnail-${timestamp}.png`;
+      
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Failed to download thumbnail:", error);
+    }
+  };
 
   const statusIcons = {
     idle: null,
@@ -164,6 +195,40 @@ export const AgentNode = memo(({ data, selected, id }: ExtendedNodeProps) => {
             )}
           </div>
         </div>
+        
+        {/* Manual transcription indicator */}
+        {data.hasManualTranscriptions && (
+          <div className={`mb-3 flex items-center gap-2 text-xs bg-purple-500/10 text-purple-600 dark:text-purple-400 px-2 py-1 rounded-md transition-all ${
+            data.status === 'generating' ? 'animate-pulse ring-2 ring-purple-500/50 ring-offset-2 ring-offset-background' : ''
+          }`}>
+            <Files className={`h-3.5 w-3.5 ${data.status === 'generating' ? 'animate-bounce' : ''}`} />
+            <span>{data.status === 'generating' ? 'Processing' : 'Using'} {data.manualTranscriptionCount} manual transcription{data.manualTranscriptionCount! > 1 ? 's' : ''}</span>
+            {data.status === 'generating' && (
+              <div className="flex gap-0.5">
+                <div className="w-1 h-1 bg-purple-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-1 h-1 bg-purple-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-1 h-1 bg-purple-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Mood board indicator */}
+        {data.hasMoodBoard && (
+          <div className={`mb-3 flex items-center gap-2 text-xs bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-2 py-1 rounded-md transition-all ${
+            data.status === 'generating' ? 'animate-pulse ring-2 ring-indigo-500/50 ring-offset-2 ring-offset-background' : ''
+          }`}>
+            <Sparkles className={`h-3.5 w-3.5 ${data.status === 'generating' ? 'animate-bounce' : ''}`} />
+            <span>{data.status === 'generating' ? 'Applying' : 'Using'} {data.moodBoardCount} mood board reference{data.moodBoardCount! > 1 ? 's' : ''}</span>
+            {data.status === 'generating' && (
+              <div className="flex gap-0.5">
+                <div className="w-1 h-1 bg-indigo-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-1 h-1 bg-indigo-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-1 h-1 bg-indigo-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
+              </div>
+            )}
+          </div>
+        )}
       
       {/* Show progress when generating */}
       {data.status === "generating" && data.generationProgress && (
@@ -191,14 +256,26 @@ export const AgentNode = memo(({ data, selected, id }: ExtendedNodeProps) => {
       
       {/* Regular content display */}
       {data.status !== "generating" && (data.type === "thumbnail" && data.thumbnailUrl ? (
-        <div className="mb-4 cursor-pointer group/content" onClick={data.onView}>
-          <div className="aspect-video relative rounded-xl overflow-hidden bg-black shadow-lg transition-all duration-300 hover:shadow-xl">
-            <img 
-              src={data.thumbnailUrl} 
-              alt="Generated thumbnail" 
-              className="w-full h-full object-cover transition-transform duration-300 group-hover/content:scale-105"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover/content:opacity-100 transition-opacity" />
+        <div className="mb-4">
+          <div className="relative group/thumbnail">
+            <div className="aspect-video relative rounded-xl overflow-hidden bg-black shadow-lg transition-all duration-300 hover:shadow-xl cursor-pointer" onClick={data.onView}>
+              <img 
+                src={data.thumbnailUrl} 
+                alt="Generated thumbnail" 
+                className="w-full h-full object-cover transition-transform duration-300 group-hover/thumbnail:scale-105"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover/thumbnail:opacity-100 transition-opacity" />
+            </div>
+            {/* Download button overlay */}
+            <Button
+              size="icon"
+              variant="secondary"
+              className="absolute bottom-2 right-2 h-8 w-8 opacity-0 group-hover/thumbnail:opacity-100 transition-opacity shadow-lg"
+              onClick={handleDownloadThumbnail}
+              title="Download thumbnail"
+            >
+              <Download className="h-4 w-4" />
+            </Button>
           </div>
           {data.draft && (
             <p className="text-xs text-muted-foreground mt-2 line-clamp-2 px-1">
@@ -247,7 +324,6 @@ export const AgentNode = memo(({ data, selected, id }: ExtendedNodeProps) => {
             variant="outline" 
             className="flex-1 hover:bg-primary/10 hover:border-primary/50 hover:text-primary transition-all"
             onClick={data.onRegenerate}
-            disabled={data.status === "generating"}
           >
             <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
             Regenerate
